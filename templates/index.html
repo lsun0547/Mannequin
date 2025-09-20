@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Pose Mannequin</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+</head>
+<body>
+  <h2>Upload a photo</h2>
+  <form id="uploadForm">
+    <input type="file" id="fileInput" name="file" accept="image/*" />
+    <button type="submit">Upload</button>
+  </form>
+  <div id="viewer" style="width: 800px; height: 600px;"></div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const viewer = document.getElementById('viewer');
+
+    // Three.js scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, 800/600, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(800, 600);
+    viewer.appendChild(renderer.domElement);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(0, 1, 1).normalize();
+    scene.add(light);
+
+    const skeletonGroup = new THREE.Group();
+    scene.add(skeletonGroup);
+
+    camera.position.z = 5;
+
+    function createJoint(x, y, z) {
+      const geometry = new THREE.SphereGeometry(0.05, 16, 16);
+      const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.set(x, y, z);
+      return sphere;
+    }
+
+    function updateSkeleton(keypoints) {
+      skeletonGroup.clear();
+      for (const id in keypoints) {
+        const kp = keypoints[id];
+        if (kp.visibility > 0.3) {
+          // scaled more carefully: x to [-1,1], y flipped, z scaled
+          skeletonGroup.add(createJoint(
+            (kp.x - 0.5) * 4,
+            (0.5 - kp.y) * 4,
+            kp.z * 2
+          ));
+        }
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+      if (!file) return alert('Please choose a file');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      console.log("Server response:", data); // debug log
+      if (data.keypoints) {
+        updateSkeleton(data.keypoints);
+      } else {
+        alert(data.error || "Error processing pose.");
+      }
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
