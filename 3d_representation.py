@@ -50,25 +50,36 @@ OUT_SNAPSHOT = "photo_pose_3d.png"
 
 # A small set of connections for MediaPipe POSE (use mp_pose.POSE_CONNECTIONS if mediapipe present)
 DEFAULT_CONNECTIONS = [
-    # torso
+    # Torso
     ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
+    ("LEFT_SHOULDER", "LEFT_HIP"),
+    ("RIGHT_SHOULDER", "RIGHT_HIP"),
     ("LEFT_HIP", "RIGHT_HIP"),
-    # arms
+
+    # Neck + Head
+    ("LEFT_SHOULDER", "NECK"),
+    ("RIGHT_SHOULDER", "NECK"),
+    ("NECK", "HEAD"),
+
+    # Arms
     ("LEFT_SHOULDER", "LEFT_ELBOW"),
     ("LEFT_ELBOW", "LEFT_WRIST"),
     ("RIGHT_SHOULDER", "RIGHT_ELBOW"),
     ("RIGHT_ELBOW", "RIGHT_WRIST"),
-    # shoulders -> hips
-    ("LEFT_SHOULDER", "LEFT_HIP"),
-    ("RIGHT_SHOULDER", "RIGHT_HIP"),
-    # legs
+
+    # Legs
     ("LEFT_HIP", "LEFT_KNEE"),
     ("LEFT_KNEE", "LEFT_ANKLE"),
     ("RIGHT_HIP", "RIGHT_KNEE"),
     ("RIGHT_KNEE", "RIGHT_ANKLE"),
-    # face-ish (nose to shoulders)
-    ("NOSE", "LEFT_SHOULDER"),
-    ("NOSE", "RIGHT_SHOULDER"),
+
+    # Feet
+    ("LEFT_ANKLE", "LEFT_HEEL"),
+    ("LEFT_HEEL", "LEFT_FOOT_INDEX"),
+    ("LEFT_FOOT_INDEX", "LEFT_ANKLE"),
+    ("RIGHT_ANKLE", "RIGHT_HEEL"),
+    ("RIGHT_HEEL", "RIGHT_FOOT_INDEX"),
+    ("RIGHT_FOOT_INDEX", "RIGHT_ANKLE"),
 ]
 
 # If mediapipe available, build index->name and connections from it
@@ -167,6 +178,44 @@ def synthetic_pose():
     }
     return out, (640, 640)
 
+def add_virtual_joints(keypoints, head_scale=1.2):
+    """Add NECK and HEAD joints, remove all detailed face points."""
+
+    # --- Create NECK ---
+    if "LEFT_SHOULDER" in keypoints and "RIGHT_SHOULDER" in keypoints:
+        ls = keypoints["LEFT_SHOULDER"]
+        rs = keypoints["RIGHT_SHOULDER"]
+        neck = {
+            "x": (ls["x"] + rs["x"]) / 2,
+            "y": (ls["y"] + rs["y"]) / 2,
+            "z": (ls["z"] + rs["z"]) / 2,
+            "visibility": min(ls["visibility"], rs["visibility"]),
+        }
+        keypoints["NECK"] = neck
+
+        # --- Create HEAD above NECK ---
+        if "NOSE" in keypoints:
+            nose = keypoints["NOSE"]
+            # distance between nose and neck = natural head height
+            dy = neck["y"] - nose["y"]
+            head = {
+                "x": neck["x"],
+                "y": neck["y"] - dy * head_scale,  # scale upward
+                "z": (neck["z"] + nose["z"]) / 2,
+                "visibility": min(neck["visibility"], nose["visibility"]),
+            }
+            keypoints["HEAD"] = head
+
+    # --- Remove ALL face points ---
+    face_prefixes = [
+        "NOSE", "EYE", "EAR", "MOUTH"
+    ]
+    for n in list(keypoints.keys()):
+        if any(pref in n for pref in face_prefixes):
+            del keypoints[n]
+
+    return keypoints
+
 def build_xyz_arrays(keypoints):
     """Return numpy arrays X, Y, Z and list of names ordered for plotting."""
     names = list(keypoints.keys())
@@ -189,19 +238,26 @@ def plot_3d(keypoints, img_size=None, connections=None, save_snapshot=True):
     # Scatter points
     ax.scatter(X, Y_plot, Z, s=40)
 
-    # Label points (avoid extreme overlap by small offset)
+    # Label points
     for xi, yi, zi, nm, vi in zip(X, Y_plot, Z, names, V):
-        # label only reasonably visible points
         if vi >= 0.15:
             ax.text(xi + 5.0, yi + 5.0, zi, nm, fontsize=8)
 
-    # Draw skeleton connections
+    # 🔧 FIX: Draw skeleton connections using scaled Z and flipped Y
     if connections:
         for a_name, b_name in connections:
             if a_name in keypoints and b_name in keypoints:
-                xa, ya, za = keypoints[a_name]["x"], -keypoints[a_name]["y"], keypoints[a_name]["z"]
-                xb, yb, zb = keypoints[b_name]["x"], -keypoints[b_name]["y"], keypoints[b_name]["z"]
-                ax.plot([xa, xb], [ya, yb], [za, zb])
+                xa, ya, za = (
+                    keypoints[a_name]["x"],
+                    -keypoints[a_name]["y"],
+                    keypoints[a_name]["z"] * Z_SCALE,   # scale Z same as points
+                )
+                xb, yb, zb = (
+                    keypoints[b_name]["x"],
+                    -keypoints[b_name]["y"],
+                    keypoints[b_name]["z"] * Z_SCALE,   # scale Z same as points
+                )
+                ax.plot([xa, xb], [ya, yb], [za, zb], c="blue")
 
     # Axis labels and equal aspect
     ax.set_xlabel("X (px)")
@@ -209,7 +265,6 @@ def plot_3d(keypoints, img_size=None, connections=None, save_snapshot=True):
     ax.set_zlabel("Z (relative depth)")
     ax.set_title("3D Pose Visualization (rotate with mouse)")
 
-    # attempt to set equal aspect ratio
     try:
         max_range = np.array([X.max()-X.min(), Y_plot.max()-Y_plot.min(), Z.max()-Z.min()]).max()
         mid_x = (X.max()+X.min()) * 0.5
@@ -258,7 +313,10 @@ def main():
         kp, size = synthetic_pose()
 
     # Choose which connections to show: if we have official connections, use them
-    connections = CONNECTIONS
+    connections = DEFAULT_CONNECTIONS
+
+    # Add virtual NECK + HEAD, remove face points
+    kp = add_virtual_joints(kp, head_scale=1.2)
 
     # Plot
     plot_3d(kp, img_size=size, connections=connections)
