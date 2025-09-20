@@ -59,7 +59,8 @@ DEFAULT_CONNECTIONS = [
     # Neck + Head
     ("LEFT_SHOULDER", "NECK"),
     ("RIGHT_SHOULDER", "NECK"),
-    ("NECK", "HEAD"),
+    ("NECK", "HEAD_BOTTOM"),
+    ("HEAD_BOTTOM", "HEAD_TOP"),  # 👈 New head line
 
     # Arms
     ("LEFT_SHOULDER", "LEFT_ELBOW"),
@@ -178,8 +179,8 @@ def synthetic_pose():
     }
     return out, (640, 640)
 
-def add_virtual_joints(keypoints, head_scale=1.2):
-    """Add NECK and HEAD joints, remove all detailed face points."""
+def add_virtual_joints(keypoints, head_scale=1.0):
+    """Add NECK, HEAD_BOTTOM, and HEAD_TOP joints using face points, then remove detailed face landmarks."""
 
     # --- Create NECK ---
     if "LEFT_SHOULDER" in keypoints and "RIGHT_SHOULDER" in keypoints:
@@ -193,26 +194,65 @@ def add_virtual_joints(keypoints, head_scale=1.2):
         }
         keypoints["NECK"] = neck
 
-        # --- Create HEAD above NECK ---
-        if "NOSE" in keypoints:
-            nose = keypoints["NOSE"]
-            # distance between nose and neck = natural head height
-            dy = neck["y"] - nose["y"]
-            head = {
-                "x": neck["x"],
-                "y": neck["y"] - dy * head_scale,  # scale upward
-                "z": (neck["z"] + nose["z"]) / 2,
-                "visibility": min(neck["visibility"], nose["visibility"]),
+        # --- HEAD_BOTTOM: blend between ears and neck ---
+        if "LEFT_EAR" in keypoints and "RIGHT_EAR" in keypoints:
+            le = keypoints["LEFT_EAR"]
+            re = keypoints["RIGHT_EAR"]
+            ear_mid = {
+                "x": (le["x"] + re["x"]) / 2,
+                "y": (le["y"] + re["y"]) / 2,
+                "z": (le["z"] + re["z"]) / 2,
             }
-            keypoints["HEAD"] = head
+            # α = 0.6 pulls it 60% toward NECK, 40% toward ears
+            alpha = 0.6
+            head_bottom = {
+                "x": alpha * neck["x"] + (1 - alpha) * ear_mid["x"],
+                "y": alpha * neck["y"] + (1 - alpha) * ear_mid["y"],
+                "z": alpha * neck["z"] + (1 - alpha) * ear_mid["z"],
+                "visibility": min(le["visibility"], re["visibility"], neck["visibility"]),
+            }
+        else:
+            # fallback
+            head_bottom = {
+                "x": neck["x"],
+                "y": neck["y"] - 20,
+                "z": neck["z"],
+                "visibility": neck["visibility"],
+            }
+        keypoints["HEAD_BOTTOM"] = head_bottom
 
-    # --- Remove ALL face points ---
-    face_prefixes = [
-        "NOSE", "EYE", "EAR", "MOUTH"
-    ]
+        # --- HEAD_TOP: based on eye midpoint, extended upward ---
+        if "LEFT_EYE" in keypoints and "RIGHT_EYE" in keypoints:
+            leye = keypoints["LEFT_EYE"]
+            reye = keypoints["RIGHT_EYE"]
+            eye_mid = {
+                "x": (leye["x"] + reye["x"]) / 2,
+                "y": (leye["y"] + reye["y"]) / 2,
+                "z": (leye["z"] + reye["z"]) / 2,
+            }
+            dy = head_bottom["y"] - eye_mid["y"]  # vertical span from eyes to ear level
+            head_top = {
+                "x": eye_mid["x"],
+                "y": eye_mid["y"] - dy * head_scale,  # extend upward
+                "z": eye_mid["z"],
+                "visibility": min(head_bottom["visibility"], leye["visibility"], reye["visibility"]),
+            }
+        else:
+            # fallback: just push upward from head_bottom
+            head_top = {
+                "x": head_bottom["x"],
+                "y": head_bottom["y"] - 40,
+                "z": head_bottom["z"],
+                "visibility": head_bottom["visibility"],
+            }
+        keypoints["HEAD_TOP"] = head_top
+
+    # --- Remove ALL other face points (nose, eyes, ears, mouth, etc.) ---
+    face_prefixes = ["NOSE", "EYE", "EAR", "MOUTH"]
     for n in list(keypoints.keys()):
         if any(pref in n for pref in face_prefixes):
-            del keypoints[n]
+            if n not in ["HEAD_BOTTOM", "HEAD_TOP"]:  # keep the abstracted head joints
+                del keypoints[n]
 
     return keypoints
 
