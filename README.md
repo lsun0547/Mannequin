@@ -3,7 +3,7 @@
 This project uses **Flask**, **MediaPipe**, and **Three.js** to generate a 3D mannequin from an uploaded photo.
 
 ## Goals
-- This project was created for the **Hello World** Hackathon at Purdue University.
+- This project was created for the [**Hello World**](https://hello-world-2025.devpost.com/) Hackathon at Purdue University.
 - The goal of this project is to allow users to create a 3D model based off an inputted 2D image.
   - This is intended to offer artists an extra tool for perspective drawing and could further be utilized for basic 3d animation.
 - Developing this project further would include adding functionality with **Blender**, allowing users to upload a photo and get a model rigged to that pose.
