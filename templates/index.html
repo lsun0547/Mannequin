@@ -165,7 +165,7 @@ function makeHead(points) {
   const dir1 = new THREE.Vector3().subVectors(hb, nk);
   const len1 = dir1.length();
   const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(len1 * 0.4, 32, 32),
+    new THREE.SphereGeometry(len1 * 0.8, 32, 32),
     new THREE.MeshStandardMaterial({ color: 0x00ff00 })
   );
   ball.position.set((nk.x + hb.x)/2, (nk.y + hb.y)/2, (nk.z + hb.z)/2);
@@ -197,8 +197,9 @@ function updateSkeleton(keypoints) {
     }
   }
 
-  if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"]) {
-    pointMeshes["HEAD_BOTTOM"].lerp(pointMeshes["NECK"], 0.4);
+  if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"] && pointMeshes["HEAD_TOP"]) {
+    pointMeshes["HEAD_BOTTOM"].lerp(pointMeshes["NECK"], 0.5);
+    pointMeshes["HEAD_TOP"].lerp(pointMeshes["HEAD_BOTTOM"], 0.2);
   }
 
   const LIMBS = [
