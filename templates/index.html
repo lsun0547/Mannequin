@@ -32,253 +32,265 @@
 </main>
 
 <script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.156.1/examples/jsm/controls/OrbitControls.js";
-import { ConvexGeometry } from "https://cdn.jsdelivr.net/npm/three@0.156.1/examples/jsm/geometries/ConvexGeometry.js";
+    import * as THREE from "three";
+    import {
+      OrbitControls
+    } from "https://cdn.jsdelivr.net/npm/three@0.156.1/examples/jsm/controls/OrbitControls.js";
+    import {
+      ConvexGeometry
+    } from "https://cdn.jsdelivr.net/npm/three@0.156.1/examples/jsm/geometries/ConvexGeometry.js";
+    const viewer = document.getElementById('viewer');
+    const form = document.getElementById('uploadForm');
+    const imagePreview = document.getElementById('imagePreview');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f0f0f);
+    const camera = new THREE.PerspectiveCamera(60, viewer.clientWidth /
+      viewer.clientHeight, 0.01, 1000);
+    camera.position.set(0, 1.6, 4);
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true
+    });
+    renderer.setPixelRatio(window.devicePixelRatio ?? 1);
+    renderer.setSize(viewer.clientWidth, viewer.clientHeight);
+    viewer.appendChild(renderer.domElement);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(3, 5, 2);
+    scene.add(dirLight);
+    scene.add(new THREE.AmbientLight(0x666666));
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.target.set(0, 1, 0);
+    const skeletonGroup = new THREE.Group();
+    scene.add(skeletonGroup);
 
-const viewer = document.getElementById('viewer');
-const form = document.getElementById('uploadForm');
-const imagePreview = document.getElementById('imagePreview');
+    function makeJoint(pos, radius = 0.07, color = 0x00ff00) {
+      const geometry = new THREE.SphereGeometry(radius, 16, 16);
+      const material = new THREE.MeshStandardMaterial({
+        color,
+        transparent: false
+      });
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.copy(pos);
+      return sphere;
+    }
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0f0f0f);
+    function makeLimb(a, b, color = 0xff0000, mode = "normal") {
+      const dir = new THREE.Vector3().subVectors(b, a);
+      const len = dir.length();
+      let radius = Math.max(len * 0.12, 0.06);
+      if (mode === "head") radius = Math.max(len * 0.25, 0.2);
+      const geom = new THREE.CylinderGeometry(radius, radius, len * 0.9,
+        16);
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        transparent: false
+      });
+      const cyl = new THREE.Mesh(geom, mat);
+      const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(
+        0.5);
+      cyl.position.copy(mid);
+      const axis = new THREE.Vector3(0, 1, 0);
+      const quat = new THREE.Quaternion().setFromUnitVectors(axis, dir
+        .clone().normalize());
+      cyl.quaternion.copy(quat);
+      return cyl;
+    }
 
-const camera = new THREE.PerspectiveCamera(60, viewer.clientWidth / viewer.clientHeight, 0.01, 1000);
-camera.position.set(0, 1.6, 4);
+    function makeTorso(ls, rs, lh, rh) {
+      if (!ls || !rs || !lh || !rh) return null;
+      const depth = 0.15;
+      const tilt = 0.1;
+      const frontDown = new THREE.Vector3(0, -tilt, depth);
+      const backUp = new THREE.Vector3(0, tilt, -depth);
+      const points = [
+        ls.clone().add(frontDown),
+        rs.clone().add(frontDown),
+        lh.clone().add(frontDown),
+        rh.clone().add(frontDown),
+        ls.clone().add(backUp),
+        rs.clone().add(backUp),
+        lh.clone().add(backUp),
+        rh.clone().add(backUp),
+      ];
+      const geometry = new ConvexGeometry(points);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xff0000,
+        flatShading: true
+      });
+      return new THREE.Mesh(geometry, material);
+    }
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio ?? 1);
-renderer.setSize(viewer.clientWidth, viewer.clientHeight);
-viewer.appendChild(renderer.domElement);
+    function makeFoot(ankle, heel, toe) {
+      const length = heel.distanceTo(toe);
+      const width = 0.15;
+      const height = 0.08;
+      const geom = new THREE.BoxGeometry(length, height, width);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xff0000
+      });
+      const box = new THREE.Mesh(geom, mat);
+      const mid = new THREE.Vector3().addVectors(heel, toe)
+        .multiplyScalar(0.5);
+      box.position.copy(mid);
+      box.position.lerp(ankle, 0.5);
+      const dir = new THREE.Vector3().subVectors(toe, heel).normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE
+        .Vector3(1, 0, 0), dir);
+      box.quaternion.copy(quat);
+      return box;
+    }
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-dirLight.position.set(3, 5, 2);
-scene.add(dirLight);
-scene.add(new THREE.AmbientLight(0x666666));
+    function makeHand(wrist, index, pinky) {
+      const mid = new THREE.Vector3().addVectors(index, pinky)
+        .multiplyScalar(0.5);
+      const dir = new THREE.Vector3().subVectors(mid, wrist).normalize();
+      const width = index.distanceTo(pinky);
+      const length = wrist.distanceTo(mid);
+      const thickness = 0.06;
+      const geom = new THREE.BoxGeometry(width, thickness, length);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xff0000
+      });
+      const box = new THREE.Mesh(geom, mat);
+      const center = new THREE.Vector3().addVectors(wrist, mid)
+        .multiplyScalar(0.5);
+      box.position.copy(center);
+      const up = new THREE.Vector3(0, 0, 1);
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
+      box.quaternion.copy(quat);
+      return box;
+    }
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.target.set(0, 1, 0);
+    function makeHead(points) {
+      const nk = points["NECK"],
+        hb = points["HEAD_BOTTOM"],
+        ht = points["HEAD_TOP"];
+      if (!nk || !hb || !ht) return null;
+      const group = new THREE.Group();
+      const dir1 = new THREE.Vector3().subVectors(hb, nk);
+      const len1 = dir1.length();
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(len1 * 0.8, 32, 32),
+        new THREE.MeshStandardMaterial({
+          color: 0x00ff00
+        })
+      );
+      ball.position.set((nk.x + hb.x) / 2, (nk.y + hb.y) / 2, (nk.z + hb
+        .z) / 2);
+      group.add(ball);
+      const a = new THREE.Vector3(hb.x, hb.y, hb.z);
+      const b = new THREE.Vector3(ht.x, ht.y, ht.z);
+      const limb = makeLimb(a, b, 0xff0000, "head");
+      group.add(limb);
+      return group;
+    }
 
-const skeletonGroup = new THREE.Group();
-scene.add(skeletonGroup);
-
-function makeJoint(pos, radius=0.07, color=0x00ff00) {
-  const geometry = new THREE.SphereGeometry(radius, 16, 16);
-  const material = new THREE.MeshStandardMaterial({ color, transparent: false });
-  const sphere = new THREE.Mesh(geometry, material);
-  sphere.position.copy(pos);
-  return sphere;
-}
-
-function makeLimb(a, b, color = 0xff0000, mode = "normal") {
-  const dir = new THREE.Vector3().subVectors(b, a);
-  const len = dir.length();
-  let radius = Math.max(len * 0.12, 0.06);
-  if (mode === "head") radius = Math.max(len * 0.25, 0.2);
-
-  const geom = new THREE.CylinderGeometry(radius, radius, len * 0.9, 16);
-  const mat = new THREE.MeshStandardMaterial({ color, transparent: false });
-  const cyl = new THREE.Mesh(geom, mat);
-
-  const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-  cyl.position.copy(mid);
-
-  const axis = new THREE.Vector3(0, 1, 0);
-  const quat = new THREE.Quaternion().setFromUnitVectors(axis, dir.clone().normalize());
-  cyl.quaternion.copy(quat);
-
-  return cyl;
-}
-
-function makeTorso(ls, rs, lh, rh) {
-  if (!ls || !rs || !lh || !rh) return null;
-  const depth = 0.15;
-  const tilt = 0.1;
-  const frontDown = new THREE.Vector3(0, -tilt, depth);
-  const backUp    = new THREE.Vector3(0,  tilt, -depth);
-
-  const points = [
-    ls.clone().add(frontDown),
-    rs.clone().add(frontDown),
-    lh.clone().add(frontDown),
-    rh.clone().add(frontDown),
-    ls.clone().add(backUp),
-    rs.clone().add(backUp),
-    lh.clone().add(backUp),
-    rh.clone().add(backUp),
-  ];
-
-  const geometry = new ConvexGeometry(points);
-  const material = new THREE.MeshStandardMaterial({ color: 0xff0000, flatShading: true });
-  return new THREE.Mesh(geometry, material);
-}
-
-function makeFoot(ankle, heel, toe) {
-  const length = heel.distanceTo(toe);
-  const width = 0.15;
-  const height = 0.08;
-  const geom = new THREE.BoxGeometry(length, height, width);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  const box = new THREE.Mesh(geom, mat);
-
-  const mid = new THREE.Vector3().addVectors(heel, toe).multiplyScalar(0.5);
-  box.position.copy(mid);
-  box.position.lerp(ankle, 0.5);
-
-  const dir = new THREE.Vector3().subVectors(toe, heel).normalize();
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
-  box.quaternion.copy(quat);
-
-  return box;
-}
-
-function makeHand(wrist, index, pinky) {
-  const mid = new THREE.Vector3().addVectors(index, pinky).multiplyScalar(0.5);
-  const dir = new THREE.Vector3().subVectors(mid, wrist).normalize();
-
-  const width = index.distanceTo(pinky);
-  const length = wrist.distanceTo(mid);
-  const thickness = 0.06;
-
-  const geom = new THREE.BoxGeometry(width, thickness, length);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  const box = new THREE.Mesh(geom, mat);
-
-  const center = new THREE.Vector3().addVectors(wrist, mid).multiplyScalar(0.5);
-  box.position.copy(center);
-
-  const up = new THREE.Vector3(0, 0, 1);
-  const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
-  box.quaternion.copy(quat);
-
-  return box;
-}
-
-function makeHead(points) {
-  const nk = points["NECK"], hb = points["HEAD_BOTTOM"], ht = points["HEAD_TOP"];
-  if (!nk || !hb || !ht) return null;
-
-  const group = new THREE.Group();
-
-  const dir1 = new THREE.Vector3().subVectors(hb, nk);
-  const len1 = dir1.length();
-  const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(len1 * 0.8, 32, 32),
-    new THREE.MeshStandardMaterial({ color: 0x00ff00 })
-  );
-  ball.position.set((nk.x + hb.x)/2, (nk.y + hb.y)/2, (nk.z + hb.z)/2);
-  group.add(ball);
-
-  const a = new THREE.Vector3(hb.x, hb.y, hb.z);
-  const b = new THREE.Vector3(ht.x, ht.y, ht.z);
-  const limb = makeLimb(a, b, 0xff0000, "head");
-  group.add(limb);
-
-  return group;
-}
-
-function updateSkeleton(keypoints) {
-  skeletonGroup.clear();
-  const pointMeshes = {};
-
-  for (const [name, kp] of Object.entries(keypoints)) {
-    if (kp.visibility > 0.3) {
-      const x = (kp.x - 0.5) * 4;
-      const y = -(kp.y - 0.5) * 4;
-      const z = -(kp.z) * 1.5;
-      pointMeshes[name] = new THREE.Vector3(x, y, z);
-
-      if (!["HEAD_TOP","HEAD_BOTTOM","NECK","LEFT_FOOT_INDEX","RIGHT_FOOT_INDEX",
-            "LEFT_INDEX","LEFT_PINKY","RIGHT_INDEX","RIGHT_PINKY"].includes(name)) {
-        skeletonGroup.add(makeJoint(pointMeshes[name]));
+    function updateSkeleton(keypoints) {
+      skeletonGroup.clear();
+      const pointMeshes = {};
+      for (const [name, kp] of Object.entries(keypoints)) {
+        if (kp.visibility > 0.3) {
+          const x = (kp.x - 0.5) * 4;
+          const y = -(kp.y - 0.5) * 4;
+          const z = -(kp.z) * 1.5;
+          pointMeshes[name] = new THREE.Vector3(x, y, z);
+          if (!["HEAD_TOP", "HEAD_BOTTOM", "NECK", "LEFT_FOOT_INDEX",
+              "RIGHT_FOOT_INDEX",
+              "LEFT_INDEX", "LEFT_PINKY", "RIGHT_INDEX", "RIGHT_PINKY"
+            ].includes(name)) {
+            skeletonGroup.add(makeJoint(pointMeshes[name]));
+          }
+        }
+      }
+      if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"] &&
+        pointMeshes["HEAD_TOP"]) {
+        pointMeshes["HEAD_BOTTOM"].lerp(pointMeshes["NECK"], 0.5);
+        pointMeshes["HEAD_TOP"].lerp(pointMeshes["HEAD_BOTTOM"], 0.2);
+      }
+      const LIMBS = [
+        ["LEFT_SHOULDER", "LEFT_ELBOW"],
+        ["LEFT_ELBOW", "LEFT_WRIST"],
+        ["RIGHT_SHOULDER", "RIGHT_ELBOW"],
+        ["RIGHT_ELBOW", "RIGHT_WRIST"],
+        ["LEFT_HIP", "LEFT_KNEE"],
+        ["LEFT_KNEE", "LEFT_ANKLE"],
+        ["RIGHT_HIP", "RIGHT_KNEE"],
+        ["RIGHT_KNEE", "RIGHT_ANKLE"]
+      ];
+      for (const [a, b] of LIMBS) {
+        if (pointMeshes[a] && pointMeshes[b]) {
+          skeletonGroup.add(makeLimb(pointMeshes[a], pointMeshes[b]));
+        }
+      }
+      if (pointMeshes["LEFT_SHOULDER"] && pointMeshes["RIGHT_SHOULDER"] &&
+        pointMeshes["LEFT_HIP"] && pointMeshes["RIGHT_HIP"]) {
+        skeletonGroup.add(makeTorso(
+          pointMeshes["LEFT_SHOULDER"],
+          pointMeshes["RIGHT_SHOULDER"],
+          pointMeshes["LEFT_HIP"],
+          pointMeshes["RIGHT_HIP"]
+        ));
+      }
+      if (pointMeshes["LEFT_ANKLE"] && pointMeshes["LEFT_HEEL"] &&
+        pointMeshes["LEFT_FOOT_INDEX"]) {
+        skeletonGroup.add(makeFoot(pointMeshes["LEFT_ANKLE"], pointMeshes[
+          "LEFT_HEEL"], pointMeshes["LEFT_FOOT_INDEX"]));
+      }
+      if (pointMeshes["RIGHT_ANKLE"] && pointMeshes["RIGHT_HEEL"] &&
+        pointMeshes["RIGHT_FOOT_INDEX"]) {
+        skeletonGroup.add(makeFoot(pointMeshes["RIGHT_ANKLE"],
+          pointMeshes["RIGHT_HEEL"], pointMeshes["RIGHT_FOOT_INDEX"]));
+      }
+      if (pointMeshes["LEFT_WRIST"] && pointMeshes["LEFT_INDEX"] &&
+        pointMeshes["LEFT_PINKY"]) {
+        skeletonGroup.add(makeHand(pointMeshes["LEFT_WRIST"], pointMeshes[
+          "LEFT_INDEX"], pointMeshes["LEFT_PINKY"]));
+      }
+      if (pointMeshes["RIGHT_WRIST"] && pointMeshes["RIGHT_INDEX"] &&
+        pointMeshes["RIGHT_PINKY"]) {
+        skeletonGroup.add(makeHand(pointMeshes["RIGHT_WRIST"],
+          pointMeshes["RIGHT_INDEX"], pointMeshes["RIGHT_PINKY"]));
+      }
+      if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"] &&
+        pointMeshes["HEAD_TOP"]) {
+        skeletonGroup.add(makeHead(pointMeshes));
       }
     }
-  }
 
-  if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"] && pointMeshes["HEAD_TOP"]) {
-    pointMeshes["HEAD_BOTTOM"].lerp(pointMeshes["NECK"], 0.5);
-    pointMeshes["HEAD_TOP"].lerp(pointMeshes["HEAD_BOTTOM"], 0.2);
-  }
-
-  const LIMBS = [
-    ["LEFT_SHOULDER","LEFT_ELBOW"],
-    ["LEFT_ELBOW","LEFT_WRIST"],
-    ["RIGHT_SHOULDER","RIGHT_ELBOW"],
-    ["RIGHT_ELBOW","RIGHT_WRIST"],
-    ["LEFT_HIP","LEFT_KNEE"],
-    ["LEFT_KNEE","LEFT_ANKLE"],
-    ["RIGHT_HIP","RIGHT_KNEE"],
-    ["RIGHT_KNEE","RIGHT_ANKLE"]
-  ];
-  for (const [a,b] of LIMBS) {
-    if (pointMeshes[a] && pointMeshes[b]) {
-      skeletonGroup.add(makeLimb(pointMeshes[a], pointMeshes[b]));
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
     }
-  }
+    animate();
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const file = document.getElementById('fileInput').files[0];
+      if (!file) return alert('Choose a file');
+      imagePreview.src = URL.createObjectURL(file);
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch('/upload', {
+          method: 'POST',
+          body: fd
+        });
+        const data = await res.json();
+        if (data.keypoints) updateSkeleton(data.keypoints);
+        else alert(data.error || 'No keypoints returned');
+      } catch (err) {
+        console.error(err);
+        alert('Upload failed — check console.');
+      }
+    });
 
-  if (pointMeshes["LEFT_SHOULDER"] && pointMeshes["RIGHT_SHOULDER"] &&
-      pointMeshes["LEFT_HIP"] && pointMeshes["RIGHT_HIP"]) {
-    skeletonGroup.add(makeTorso(
-      pointMeshes["LEFT_SHOULDER"],
-      pointMeshes["RIGHT_SHOULDER"],
-      pointMeshes["LEFT_HIP"],
-      pointMeshes["RIGHT_HIP"]
-    ));
-  }
-
-  if (pointMeshes["LEFT_ANKLE"] && pointMeshes["LEFT_HEEL"] && pointMeshes["LEFT_FOOT_INDEX"]) {
-    skeletonGroup.add(makeFoot(pointMeshes["LEFT_ANKLE"], pointMeshes["LEFT_HEEL"], pointMeshes["LEFT_FOOT_INDEX"]));
-  }
-  if (pointMeshes["RIGHT_ANKLE"] && pointMeshes["RIGHT_HEEL"] && pointMeshes["RIGHT_FOOT_INDEX"]) {
-    skeletonGroup.add(makeFoot(pointMeshes["RIGHT_ANKLE"], pointMeshes["RIGHT_HEEL"], pointMeshes["RIGHT_FOOT_INDEX"]));
-  }
-
-  if (pointMeshes["LEFT_WRIST"] && pointMeshes["LEFT_INDEX"] && pointMeshes["LEFT_PINKY"]) {
-    skeletonGroup.add(makeHand(pointMeshes["LEFT_WRIST"], pointMeshes["LEFT_INDEX"], pointMeshes["LEFT_PINKY"]));
-  }
-  if (pointMeshes["RIGHT_WRIST"] && pointMeshes["RIGHT_INDEX"] && pointMeshes["RIGHT_PINKY"]) {
-    skeletonGroup.add(makeHand(pointMeshes["RIGHT_WRIST"], pointMeshes["RIGHT_INDEX"], pointMeshes["RIGHT_PINKY"]));
-  }
-
-  if (pointMeshes["NECK"] && pointMeshes["HEAD_BOTTOM"] && pointMeshes["HEAD_TOP"]) {
-    skeletonGroup.add(makeHead(pointMeshes));
-  }
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
-}
-animate();
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const file = document.getElementById('fileInput').files[0];
-  if (!file) return alert('Choose a file');
-
-  imagePreview.src = URL.createObjectURL(file);
-
-  const fd = new FormData(); fd.append('file', file);
-  try {
-    const res = await fetch('/upload', { method:'POST', body: fd });
-    const data = await res.json();
-    if (data.keypoints) updateSkeleton(data.keypoints);
-    else alert(data.error || 'No keypoints returned');
-  } catch(err) {
-    console.error(err);
-    alert('Upload failed — check console.');
-  }
-});
-
-function onResize() {
-  camera.aspect = viewer.clientWidth / viewer.clientHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(viewer.clientWidth, viewer.clientHeight);
-}
-window.addEventListener('resize', onResize);
+    function onResize() {
+      camera.aspect = viewer.clientWidth / viewer.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(viewer.clientWidth, viewer.clientHeight);
+    }
+    window.addEventListener('resize', onResize);
 </script>
 </body>
 </html>
