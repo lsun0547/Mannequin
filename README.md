@@ -43,7 +43,7 @@ To simplify the skeleton, some joints are combined into higher-level shapes:
 
 
 ## Requirements
-- Python 3.9 to 3.11
+- Python 3.9 to 3.12
 - Flask
 - MediaPipe
 - OpenCV
