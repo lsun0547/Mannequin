@@ -1,26 +1,5 @@
-# plot_pose_3d.py
-"""
-Plot 3D pose landmarks from MediaPipe (photo.jpg) or from a JSON export.
-
-Usage:
-  python plot_pose_3d.py
-
-Dependencies (for full functionality):
-  - numpy
-  - matplotlib
-  - opencv-python (optional, only to read image for size)
-  - mediapipe (optional; if missing script will try to load JSON or synthetic sample)
-
-Behavior:
-  - If mediapipe is installed and photo.jpg exists, script will run mediapipe on it.
-  - Else it will look for photo_keypoints_named.json (format produced by the MediaPipe named export).
-  - Else it will use a synthetic demo pose.
-"""
-
 import os
 import json
-import math
-import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,7 +25,6 @@ Z_SCALE = -1000
 
 IMAGE_PATH = "NotBlake.JPG"
 JSON_PATH = "photo_keypoints_named.json"
-OUT_SNAPSHOT = "photo_pose_3d.png"
 
 # A small set of connections for MediaPipe POSE (use mp_pose.POSE_CONNECTIONS if mediapipe present)
 DEFAULT_CONNECTIONS = [
@@ -67,6 +45,10 @@ DEFAULT_CONNECTIONS = [
     ("LEFT_ELBOW", "LEFT_WRIST"),
     ("RIGHT_SHOULDER", "RIGHT_ELBOW"),
     ("RIGHT_ELBOW", "RIGHT_WRIST"),
+
+    # Hands
+    ("LEFT_WRIST", "LEFT_HAND"),
+    ("RIGHT_WRIST", "RIGHT_HAND"),
 
     # Legs
     ("LEFT_HIP", "LEFT_KNEE"),
@@ -180,8 +162,9 @@ def synthetic_pose():
     return out, (640, 640)
 
 def add_virtual_joints(keypoints, head_scale=1.0):
-    """Add NECK, HEAD_BOTTOM, and HEAD_TOP joints using face points, then remove detailed face landmarks."""
-
+    """Add NECK, HEAD_BOTTOM, HEAD_TOP and abstract hands into LEFT_HAND/RIGHT_HAND.
+    Remove detailed face points and hand-finger points while preserving foot landmarks.
+    """
     # --- Create NECK ---
     if "LEFT_SHOULDER" in keypoints and "RIGHT_SHOULDER" in keypoints:
         ls = keypoints["LEFT_SHOULDER"]
@@ -190,11 +173,11 @@ def add_virtual_joints(keypoints, head_scale=1.0):
             "x": (ls["x"] + rs["x"]) / 2,
             "y": (ls["y"] + rs["y"]) / 2,
             "z": (ls["z"] + rs["z"]) / 2,
-            "visibility": min(ls["visibility"], rs["visibility"]),
+            "visibility": min(ls.get("visibility", 0.0), rs.get("visibility", 0.0)),
         }
         keypoints["NECK"] = neck
 
-        # --- HEAD_BOTTOM: blend between ears and neck ---
+        # --- HEAD_BOTTOM: blend between ears and neck (fallback if ears missing) ---
         if "LEFT_EAR" in keypoints and "RIGHT_EAR" in keypoints:
             le = keypoints["LEFT_EAR"]
             re = keypoints["RIGHT_EAR"]
@@ -203,25 +186,24 @@ def add_virtual_joints(keypoints, head_scale=1.0):
                 "y": (le["y"] + re["y"]) / 2,
                 "z": (le["z"] + re["z"]) / 2,
             }
-            # α = 0.6 pulls it 60% toward NECK, 40% toward ears
             alpha = 0.6
             head_bottom = {
                 "x": alpha * neck["x"] + (1 - alpha) * ear_mid["x"],
                 "y": alpha * neck["y"] + (1 - alpha) * ear_mid["y"],
                 "z": alpha * neck["z"] + (1 - alpha) * ear_mid["z"],
-                "visibility": min(le["visibility"], re["visibility"], neck["visibility"]),
+                "visibility": min(le.get("visibility", 0.0), re.get("visibility", 0.0), neck["visibility"]),
             }
         else:
-            # fallback
+            # normalized-coordinate fallback (small offset)
             head_bottom = {
                 "x": neck["x"],
-                "y": neck["y"] - 20,
+                "y": neck["y"] - 0.05,
                 "z": neck["z"],
                 "visibility": neck["visibility"],
             }
         keypoints["HEAD_BOTTOM"] = head_bottom
 
-        # --- HEAD_TOP: based on eye midpoint, extended upward ---
+        # --- HEAD_TOP: use eye midpoint if available, else push up from HEAD_BOTTOM ---
         if "LEFT_EYE" in keypoints and "RIGHT_EYE" in keypoints:
             leye = keypoints["LEFT_EYE"]
             reye = keypoints["RIGHT_EYE"]
@@ -230,29 +212,64 @@ def add_virtual_joints(keypoints, head_scale=1.0):
                 "y": (leye["y"] + reye["y"]) / 2,
                 "z": (leye["z"] + reye["z"]) / 2,
             }
-            dy = head_bottom["y"] - eye_mid["y"]  # vertical span from eyes to ear level
+            dy = head_bottom["y"] - eye_mid["y"]  # vertical span from eyes to ear/neck level
             head_top = {
                 "x": eye_mid["x"],
-                "y": eye_mid["y"] - dy * head_scale,  # extend upward
+                "y": eye_mid["y"] - dy * head_scale,
                 "z": eye_mid["z"],
-                "visibility": min(head_bottom["visibility"], leye["visibility"], reye["visibility"]),
+                "visibility": min(head_bottom.get("visibility", 0.0),
+                                  leye.get("visibility", 0.0),
+                                  reye.get("visibility", 0.0)),
             }
         else:
-            # fallback: just push upward from head_bottom
             head_top = {
                 "x": head_bottom["x"],
-                "y": head_bottom["y"] - 40,
+                "y": head_bottom["y"] - 0.1,
                 "z": head_bottom["z"],
                 "visibility": head_bottom["visibility"],
             }
         keypoints["HEAD_TOP"] = head_top
 
-    # --- Remove ALL other face points (nose, eyes, ears, mouth, etc.) ---
+    # --- Abstract hands: create LEFT_HAND/RIGHT_HAND from index & pinky tips (if present) ---
+    for side in ("LEFT", "RIGHT"):
+        wrist_key = f"{side}_WRIST"
+        index_key = f"{side}_INDEX"
+        pinky_key = f"{side}_PINKY"
+
+        if index_key in keypoints and pinky_key in keypoints:
+            it = keypoints[index_key]
+            pt = keypoints[pinky_key]
+            hand_tip = {
+                "x": (it["x"] + pt["x"]) / 2,
+                "y": (it["y"] + pt["y"]) / 2,
+                "z": (it["z"] + pt["z"]) / 2,
+                "visibility": min(it.get("visibility", 0.0), pt.get("visibility", 0.0)),
+            }
+            keypoints[f"{side}_HAND"] = hand_tip
+        # if index/pinky missing but wrist present, you could fallback if desired (left out intentionally)
+
+    # --- Remove detailed face points, and remove hand finger landmarks BUT preserve foot landmarks ---
     face_prefixes = ["NOSE", "EYE", "EAR", "MOUTH"]
-    for n in list(keypoints.keys()):
-        if any(pref in n for pref in face_prefixes):
-            if n not in ["HEAD_BOTTOM", "HEAD_TOP"]:  # keep the abstracted head joints
-                del keypoints[n]
+    finger_keywords = ["INDEX", "PINKY", "THUMB", "MIDDLE", "RING"]  # finger-related tokens
+
+    for name in list(keypoints.keys()):
+        # remove face items (keep HEAD_BOTTOM/HEAD_TOP)
+        if any(pref in name for pref in face_prefixes):
+            if name not in ("HEAD_BOTTOM", "HEAD_TOP"):
+                del keypoints[name]
+            continue
+
+        # remove finger landmarks only if they are not foot-related (e.g., LEFT_FOOT_INDEX)
+        if any(fk in name for fk in finger_keywords):
+            # keep foot-related landmarks (they contain "FOOT" or "HEEL" or "TOE" or "ANKLE")
+            lower = name.upper()
+            if ("FOOT" in lower) or ("HEEL" in lower) or ("TOE" in lower) or ("ANKLE" in lower):
+                continue
+            # keep the abstracted hand if present
+            if name in ("LEFT_HAND", "RIGHT_HAND"):
+                continue
+            # otherwise delete finger landmark
+            del keypoints[name]
 
     return keypoints
 
@@ -265,7 +282,7 @@ def build_xyz_arrays(keypoints):
     V = np.array([keypoints[n].get("visibility", 0.0) for n in names], dtype=float)
     return X, Y, Z, V, names
 
-def plot_3d(keypoints, img_size=None, connections=None, save_snapshot=True):
+def plot_3d(keypoints, img_size=None, connections=None):
     """Make an interactive 3D plot of the pose."""
     X, Y, Z, V, names = build_xyz_arrays(keypoints)
     # Flip Y so that origin is bottom-left when plotting (image coords: y down)
@@ -317,10 +334,6 @@ def plot_3d(keypoints, img_size=None, connections=None, save_snapshot=True):
         pass
 
     plt.tight_layout()
-
-    if save_snapshot:
-        plt.savefig(OUT_SNAPSHOT, dpi=150)
-        print(f"Saved snapshot to {OUT_SNAPSHOT}")
 
     plt.show()
 
