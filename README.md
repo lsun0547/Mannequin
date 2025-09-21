@@ -9,6 +9,8 @@ This project uses **Flask**, **MediaPipe**, and **Three.js** to generate a 3D ma
 - Developing this project further would include adding functionality with **Blender**, allowing users to upload a photo and get a model rigged to that pose.
 
 
+
+
 ## Features
 - Upload a photo -> mannequin is generated automatically
 - Pose extracted with **MediaPipe**
@@ -16,6 +18,10 @@ This project uses **Flask**, **MediaPipe**, and **Three.js** to generate a 3D ma
   - Green spheres = joints
   - Red polygons = limbs, torso, hands, feet, head
 - **OrbitControls** enabled (rotate, zoom, pan)
+<img width="1220" height="887" alt="image" src="https://github.com/user-attachments/assets/5ca0d3fc-6025-4712-98eb-912dda010e36" />
+
+<img width="1220" height="843" alt="image" src="https://github.com/user-attachments/assets/b39d44b0-af69-4004-a570-f46c10d19cd8" />
+
 
 ## Abstractions
 
