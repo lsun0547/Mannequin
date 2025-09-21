@@ -50,4 +50,4 @@ To simplify the skeleton, some joints are combined into higher-level shapes:
 
 Install dependencies:
 ```bash
-pip install flask mediapipe opencv-python
+pip install flask mediapipe opencv-python numpy
